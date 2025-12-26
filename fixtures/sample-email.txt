@@ -1,0 +1,6 @@
+To test extraction logic, paste email content here.
+Subject: Siparişiniz Alındı - Order #PTT-998877
+Body:
+Sayın Müşteri,
+Siparişiniz PTT-998877 başarıyla alınmıştır.
+Ekte faturanızı bulabilirsiniz.
