@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, Briefcase, GitMerge, Settings, LogOut, Bot } from "lucide-react";
+import { LayoutDashboard, Briefcase, GitMerge, Upload, LogOut, Bot } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -10,6 +10,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   const navItems = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/upload", label: "Upload PDFs", icon: Upload },
     { href: "/jobs", label: "Jobs", icon: Briefcase },
     { href: "/mappings", label: "Mappings", icon: GitMerge },
   ];

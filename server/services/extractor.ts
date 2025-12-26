@@ -25,6 +25,48 @@ export function parseAmountToCents(amountStr: string): number | null {
   return isNaN(amount) ? null : Math.round(amount * 100);
 }
 
+export async function extractFromPdfBuffer(buffer: Buffer): Promise<{ insuredName: string | null, amountCents: number | null }> {
+  try {
+    const pdfParse = (pdf as any).default || pdf;
+    const data = await pdfParse(buffer);
+    const text = data.text;
+
+    const namePatterns = [
+      /(?:S[İI]GORTALI|AD\s*SOYAD|SAYIN|MÜŞTERİ|İSİM)\s*[:\-]?\s*([A-ZÇĞİÖŞÜa-zçğışöü\s]{3,50})/i,
+      /([A-ZÇĞİÖŞÜ][a-zçğışöü]+\s+[A-ZÇĞİÖŞÜ][a-zçğışöü]+)/,
+    ];
+    
+    const amountPatterns = [
+      /(?:TUTAR|TOPLAM|PRİM|BEDEL|SİGORTA\s*BEDELİ)\s*[:\-]?\s*([\d\.,]+)\s*(?:TL|TRY)?/i,
+      /([\d]{1,3}(?:\.[\d]{3})*(?:,[\d]{2}))\s*(?:TL|TRY)/i,
+    ];
+
+    let insuredName: string | null = null;
+    let amountCents: number | null = null;
+
+    for (const pattern of namePatterns) {
+      const match = text.match(pattern);
+      if (match && match[1]) {
+        insuredName = match[1].trim();
+        break;
+      }
+    }
+
+    for (const pattern of amountPatterns) {
+      const match = text.match(pattern);
+      if (match && match[1]) {
+        amountCents = parseAmountToCents(match[1]);
+        break;
+      }
+    }
+
+    return { insuredName, amountCents };
+  } catch (err) {
+    console.error("PDF Extraction Error:", err);
+    return { insuredName: null, amountCents: null };
+  }
+}
+
 export async function extractFromGigLink(url: string): Promise<{ insuredName: string, amountCents: number, pdfPath: string } | null> {
   try {
     const downloadUrl = url.includes('exportpdf=1') ? url : `${url}&exportpdf=1`;

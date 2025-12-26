@@ -87,7 +87,20 @@ export const api = {
         }),
       },
     },
-  }
+  },
+  uploads: {
+    create: {
+      method: 'POST' as const,
+      path: '/api/uploads',
+      responses: {
+        201: z.object({
+          message: z.string(),
+          jobIds: z.array(z.number()),
+        }),
+        400: errorSchemas.validation,
+      },
+    },
+  },
 };
 
 export function buildUrl(path: string, params?: Record<string, string | number>): string {

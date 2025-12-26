@@ -5,7 +5,31 @@ import { api } from "@shared/routes";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import { startWorker } from "./services/worker";
 import { startImapPoller } from "./services/imap";
+import { extractFromPdfBuffer, normalizeName } from "./services/extractor";
 import { z } from "zod";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+import crypto from "crypto";
+
+const DATA_DIR = process.env.DATA_DIR || './data';
+const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
+
+if (!fs.existsSync(UPLOADS_DIR)) {
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+}
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/pdf') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PDF files are allowed'));
+    }
+  },
+  limits: { fileSize: 10 * 1024 * 1024 }
+});
 
 export async function registerRoutes(
   httpServer: Server,
@@ -64,6 +88,67 @@ export async function registerRoutes(
       lastError: null
     });
     res.json(updated);
+  });
+
+  app.post(api.uploads.create.path, (req, res, next) => {
+    upload.array('pdfs', 20)(req, res, (err) => {
+      if (err) {
+        return res.status(400).json({ message: err.message || 'Only PDF files are allowed' });
+      }
+      next();
+    });
+  }, async (req, res) => {
+    try {
+      const files = req.files as Express.Multer.File[];
+      if (!files || files.length === 0) {
+        return res.status(400).json({ message: 'No PDF files provided' });
+      }
+
+      const jobIds: number[] = [];
+
+      for (const file of files) {
+        const sha256 = crypto.createHash('sha256').update(file.buffer).digest('hex');
+        const timestamp = Date.now();
+        const filename = `${timestamp}_${file.originalname}`;
+        const filepath = path.join(UPLOADS_DIR, filename);
+        
+        fs.writeFileSync(filepath, file.buffer);
+
+        const extracted = await extractFromPdfBuffer(file.buffer);
+
+        const email = await storage.createEmail({
+          messageId: `upload-${timestamp}-${sha256.substring(0, 8)}`,
+          fromAddr: 'manual-upload',
+          subject: file.originalname,
+          receivedAt: new Date(),
+          status: 'PROCESSED'
+        });
+
+        const attachment = await storage.createAttachment({
+          emailId: email.id,
+          filename: file.originalname,
+          filepath,
+          sha256,
+          size: file.size
+        });
+
+        const job = await storage.createJob({
+          orderId: 'UNKNOWN',
+          attachmentId: attachment.id,
+          status: 'QUEUED',
+          insuredNameRaw: extracted.insuredName,
+          insuredNameNorm: extracted.insuredName ? normalizeName(extracted.insuredName) : null,
+          amountCents: extracted.amountCents
+        });
+
+        jobIds.push(job.id);
+      }
+
+      res.status(201).json({ message: 'PDFs uploaded successfully', jobIds });
+    } catch (err: any) {
+      console.error('Upload error:', err);
+      res.status(500).json({ message: err.message || 'Upload failed' });
+    }
   });
 
   app.post(api.mappings.create.path, async (req, res) => {

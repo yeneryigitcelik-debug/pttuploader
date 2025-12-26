@@ -54,3 +54,24 @@ export function useRetryJob() {
     },
   });
 }
+
+export function useSelectCandidate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ jobId, orderId }: { jobId: number; orderId: string }) => {
+      const url = buildUrl(api.jobs.selectCandidate.path, { id: jobId });
+      const res = await fetch(url, {
+        method: api.jobs.selectCandidate.method,
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId })
+      });
+      if (!res.ok) throw new Error("Failed to select candidate");
+      return res.json();
+    },
+    onSuccess: (_, { jobId }) => {
+      queryClient.invalidateQueries({ queryKey: [api.jobs.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.jobs.get.path, jobId] });
+    },
+  });
+}

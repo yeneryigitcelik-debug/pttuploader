@@ -1,18 +1,34 @@
-import { useJob, useRetryJob } from "@/hooks/use-jobs";
+import { useJob, useRetryJob, useSelectCandidate } from "@/hooks/use-jobs";
 import { useParams, Link } from "wouter";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, ArrowLeft, RefreshCw, FileText, Image as ImageIcon, Terminal } from "lucide-react";
+import { Loader2, ArrowLeft, RefreshCw, FileText, Image as ImageIcon, Terminal, User, Banknote, Upload } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
+
+function maskName(name: string): string {
+  if (!name || name.length < 4) return '****';
+  const parts = name.split(' ');
+  return parts.map(p => p.length > 2 ? p.substring(0, 2) + '***' : p).join(' ');
+}
+
+function formatCents(cents: number | null): string {
+  if (cents === null) return 'N/A';
+  return (cents / 100).toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' });
+}
 
 export default function JobDetail() {
   const { id } = useParams();
   const jobId = Number(id);
   const { data: job, isLoading } = useJob(jobId);
   const { mutate: retry, isPending: isRetrying } = useRetryJob();
+  const { mutate: selectCandidate, isPending: isSelecting } = useSelectCandidate();
+  const { toast } = useToast();
+
+  const candidates = job?.candidatesJson ? JSON.parse(job.candidatesJson as string) : [];
 
   if (isLoading) {
     return (
@@ -104,6 +120,47 @@ export default function JobDetail() {
                 </div>
               </div>
 
+              {(job.insuredNameRaw || job.amountCents) && (
+                <>
+                  <Separator />
+                  <div>
+                    <span className="text-muted-foreground block text-xs uppercase tracking-wider mb-2">Extracted Info</span>
+                    <div className="space-y-2">
+                      {job.insuredNameRaw && (
+                        <div className="flex items-center gap-2 text-sm">
+                          <User className="h-4 w-4 text-muted-foreground" />
+                          <span className="font-medium">{maskName(job.insuredNameRaw as string)}</span>
+                        </div>
+                      )}
+                      {job.amountCents && (
+                        <div className="flex items-center gap-2 text-sm">
+                          <Banknote className="h-4 w-4 text-muted-foreground" />
+                          <span className="font-medium">{formatCents(job.amountCents as number)}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {job.matchDecision && (
+                <>
+                  <Separator />
+                  <div>
+                    <span className="text-muted-foreground block text-xs uppercase tracking-wider mb-2">Match Decision</span>
+                    <div className="text-sm">
+                      <span className={cn(
+                        "font-medium",
+                        job.matchDecision === "AUTO_UPLOAD" ? "text-green-600" : "text-amber-600"
+                      )}>{job.matchDecision}</span>
+                      {job.matchReason && (
+                        <p className="text-xs text-muted-foreground mt-1">{job.matchReason as string}</p>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+
               {job.lastError && (
                 <div className="bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/30 rounded-lg p-4 text-sm text-red-600 dark:text-red-400">
                   <p className="font-semibold mb-1">Last Error:</p>
@@ -112,6 +169,46 @@ export default function JobDetail() {
               )}
             </CardContent>
           </Card>
+
+          {job.status === "NEEDS_MANUAL_ACTION" && candidates.length > 0 && (
+            <Card className="shadow-md border-border/50 border-amber-200 dark:border-amber-800">
+              <CardHeader>
+                <CardTitle className="text-lg text-amber-700 dark:text-amber-400">Select Order</CardTitle>
+                <CardDescription>Choose the correct PTTAVM order for this PDF.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {candidates.map((candidate: any, idx: number) => (
+                  <div 
+                    key={idx}
+                    className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border border-border/50"
+                    data-testid={`candidate-${idx}`}
+                  >
+                    <div className="space-y-1">
+                      <p className="font-medium text-sm">{candidate.orderId}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {maskName(candidate.customerName)} - {formatCents(candidate.amountCents)}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        selectCandidate({ jobId: job.id, orderId: candidate.orderId }, {
+                          onSuccess: () => {
+                            toast({ title: "Order Selected", description: "Job will be re-processed." });
+                          }
+                        });
+                      }}
+                      disabled={isSelecting}
+                      data-testid={`button-select-${idx}`}
+                    >
+                      {isSelecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4 mr-1" />}
+                      Upload
+                    </Button>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
 
           <Card className="shadow-md border-border/50">
             <CardHeader>

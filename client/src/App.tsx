@@ -12,6 +12,7 @@ import Dashboard from "@/pages/Dashboard";
 import Jobs from "@/pages/Jobs";
 import JobDetail from "@/pages/JobDetail";
 import Mappings from "@/pages/Mappings";
+import UploadPDFs from "@/pages/UploadPDFs";
 import NotFound from "@/pages/not-found";
 
 function PrivateRoute({ component: Component }: { component: React.ComponentType }) {
@@ -55,6 +56,10 @@ function Router() {
 
       <Route path="/">
         <PrivateRoute component={Dashboard} />
+      </Route>
+
+      <Route path="/upload">
+        <PrivateRoute component={UploadPDFs} />
       </Route>
       
       <Route path="/jobs">
