@@ -1,17 +1,43 @@
 import { storage } from '../storage';
-import { uploadPdf } from './ptt';
+import { uploadPdf, findOrderCandidates } from './ptt';
+import { chromium } from 'playwright';
 
 export async function startWorker() {
   const interval = 10000; // 10 seconds check
 
   const processJob = async () => {
-    const job = await storage.getNextQueuedJob();
+    const nextJob = await storage.getNextQueuedJob();
+    if (!nextJob) return;
+
+    const job = await storage.getJobWithDetails(nextJob.id);
     if (!job) return;
 
+    const browser = await chromium.launch({ headless: true });
     try {
       await storage.updateJob(job.id, { status: "RUNNING" });
       
-      const result = await uploadPdf(job.orderId, job.attachment.filepath);
+      let finalOrderId = job.orderId;
+      
+      if (job.orderId === 'UNKNOWN' && job.insuredNameNorm) {
+        const page = await browser.newPage();
+        // Login and navigate logic (shared or repeated)
+        const matchResult = await findOrderCandidates(page, job.insuredNameNorm, job.amountCents || 0);
+        
+        await storage.updateJob(job.id, { 
+          matchDecision: matchResult.decision,
+          matchReason: matchResult.reason,
+          candidatesJson: JSON.stringify(matchResult.candidates)
+        });
+
+        if (matchResult.decision === 'AUTO_UPLOAD' && matchResult.selectedOrderId) {
+          finalOrderId = matchResult.selectedOrderId;
+        } else {
+          await storage.updateJob(job.id, { status: 'NEEDS_MANUAL_ACTION' });
+          return;
+        }
+      }
+
+      const result = await uploadPdf(finalOrderId, job.attachment.filepath);
       
       if (result.success) {
         await storage.updateJob(job.id, { status: "SUCCESS" });

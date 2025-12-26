@@ -50,6 +50,22 @@ export async function registerRoutes(
     res.json(updated);
   });
 
+  app.post(api.jobs.selectCandidate.path, async (req, res) => {
+    const job = await storage.getJob(Number(req.params.id));
+    if (!job) {
+      return res.status(404).json({ message: "Job not found" });
+    }
+    const { orderId } = req.body;
+    const updated = await storage.updateJob(job.id, { 
+      orderId,
+      status: "QUEUED",
+      matchDecision: "MANUAL_SELECTED",
+      attempts: 0,
+      lastError: null
+    });
+    res.json(updated);
+  });
+
   app.post(api.mappings.create.path, async (req, res) => {
     try {
       const input = api.mappings.create.input.parse(req.body);

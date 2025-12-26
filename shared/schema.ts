@@ -32,6 +32,12 @@ export const jobs = pgTable("jobs", {
   status: text("status").notNull().default("QUEUED"), // QUEUED, RUNNING, SUCCESS, FAILED, NEEDS_MANUAL_ACTION
   attempts: integer("attempts").notNull().default(0),
   lastError: text("last_error"),
+  insuredNameRaw: text("insured_name_raw"),
+  insuredNameNorm: text("insured_name_norm"),
+  amountCents: integer("amount_cents"),
+  matchDecision: text("match_decision"),
+  matchReason: text("match_reason"),
+  candidatesJson: text("candidates_json"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

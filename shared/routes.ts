@@ -48,6 +48,15 @@ export const api = {
         404: errorSchemas.notFound,
       },
     },
+    selectCandidate: {
+      method: 'POST' as const,
+      path: '/api/jobs/:id/select-candidate',
+      input: z.object({ orderId: z.string() }),
+      responses: {
+        200: z.custom<typeof jobs.$inferSelect>(),
+        404: errorSchemas.notFound,
+      },
+    },
   },
   mappings: {
     create: {

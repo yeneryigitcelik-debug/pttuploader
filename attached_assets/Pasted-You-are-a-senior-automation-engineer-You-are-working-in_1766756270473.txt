@@ -1,0 +1,108 @@
+You are a senior automation engineer. You are working inside an existing Replit project that already has:
+- IMAP poller (server/services/imap.ts)
+- Extractor (server/services/extractor.ts)
+- PTT uploader via Playwright (server/services/ptt.ts)
+- Worker/queue (server/services/worker.ts)
+- Admin UI (dashboard/jobs/mappings)
+- SQLite persistence
+
+NEW REQUIREMENT
+PTTAVM Orders page does NOT show policy number. We can ONLY match by:
+1) Customer full name (first+last) from the insurance PDF / GIG verification page
+2) Paid amount (order amount visible in PTTAVM orders list and/or order detail)
+
+Goal: For every incoming insurance document link/PDF, automatically find the correct order by (name + amount) and upload the downloaded PDF to that order.
+If ambiguous (multiple matches) or no match, do NOT upload. Mark job as NEEDS_MANUAL_ACTION and show candidates in Admin UI.
+
+DO NOT bypass CAPTCHA/MFA. If encountered, mark NEEDS_MANUAL_ACTION.
+
+MATCHING RULES (SAFETY FIRST)
+- Normalize name for matching:
+  - uppercase
+  - trim spaces, collapse multiple spaces
+  - remove punctuation
+  - normalize Turkish chars: İ->I, I/ı->I, Ş->S, Ğ->G, Ü->U, Ö->O, Ç->C
+- Amount parsing:
+  - parse strings like "1.234,56" and "1234.56" into float number
+  - store amount as integer cents (kuruş): e.g., 1234.56 -> 123456
+- Candidate selection:
+  - Step 1: collect all orders matching normalized name
+  - Step 2: among them, exact amount match (cents equality)
+     - if exactly 1 candidate -> AUTO_UPLOAD
+     - if >1 -> NEEDS_MANUAL_ACTION
+  - Step 3: if none exact, try tolerance match within +/- 100 cents (1.00 TL) (configurable)
+     - if exactly 1 candidate -> AUTO_UPLOAD
+     - if >1 or none -> NEEDS_MANUAL_ACTION
+- Idempotency:
+  - do not upload same PDF twice to same order: use attachment sha256 + orderId uniqueness.
+- Logging:
+  - never log full PII; in logs show only masked name like "YI*** CE***" and amounts.
+
+EXTRACTION REQUIREMENT
+Incoming emails contain a GIG verification link like:
+https://belgedogrulama.gig.com.tr/sfsdocumentshow/?documentid=...&exportpdf=1
+Implement extraction to get:
+- insuredName (full name)
+- amount (the insurance amount visible in the PDF or page)
+- pdf download (use the exportpdf=1 link to download)
+
+Implementation approach:
+- In server/services/extractor.ts:
+  - detect this GIG link in email body
+  - fetch the page OR directly download the PDF from exportpdf=1
+  - parse insuredName and amount from PDF text using regex patterns; keep it robust
+  - output { insuredName, amountCents, pdfPath, ... }
+
+PTTAVM SCRAPING REQUIREMENT (PLAYWRIGHT)
+- In server/services/ptt.ts:
+  - implement function findOrderCandidatesByNameAndAmount(page, insuredNameNormalized, amountCents)
+  - navigate to Orders list
+  - use the UI search/filter by name if available; if not, paginate first N pages (configurable) and collect rows
+  - for each row, extract:
+     - orderId (or order number)
+     - customer name
+     - amount displayed
+     - (optional) order date if present
+  - normalize row customer name the same way
+  - build candidates list, apply rules above, return:
+     - { decision: "AUTO_UPLOAD", selectedOrderId, candidates: [...] }
+     - or { decision: "MANUAL", candidates: [...] }
+- For upload:
+  - if AUTO_UPLOAD -> open order detail and upload PDF (existing uploader logic)
+  - if MANUAL -> do NOT upload; persist candidates to DB for UI review
+
+DATABASE CHANGES (SQLITE)
+Add columns / tables to store matching data:
+- jobs: insured_name_raw, insured_name_norm, amount_cents, match_decision, match_reason, candidates_json
+- uploads: ensure unique constraint on (orderId, attachmentSha256)
+
+ADMIN UI CHANGES
+- Jobs detail page should show:
+  - extracted insured name (masked)
+  - extracted amount
+  - match decision + reason
+  - candidate orders list (orderId, masked customer name, amount)
+- Add actions:
+  - "Select candidate and upload" (POST /jobs/:id/select-and-upload with orderId)
+  - This should re-run upload for that job using the chosen orderId (still enforce idempotency)
+
+CONFIG
+- Add env:
+  - MATCH_AMOUNT_TOLERANCE_CENTS (default 100)
+  - PTT_MAX_PAGES_TO_SCAN (default 5)
+- Update README with the new matching behavior.
+
+DELIVERABLES
+1) Code changes in extractor, ptt, worker, db migration, and UI.
+2) Add unit tests for:
+  - name normalization
+  - amount parsing
+  - candidate selection logic (exact match, tolerance, ambiguous)
+3) Ensure existing DRY_RUN mode works: in DRY_RUN do not upload, but still compute candidates and take screenshots.
+4) Add evidence screenshots in MANUAL decision too (orders list with highlights if possible).
+
+Now implement the changes fully. Do not ask me questions; make reasonable assumptions and leave selectors configurable in server/config/pttSelectors.ts.
+After implementation, summarize:
+- which secrets/envs I must set
+- where in UI I can review ambiguous jobs
+- how to update selectors if PTT UI changes

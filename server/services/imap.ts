@@ -70,10 +70,27 @@ export async function startImapPoller() {
                  });
 
                  // Extract Order ID
-                 // Try from Subject, Body, and PDF filename
                  let orderId = extractOrderId(emailRecord.subject || '') || extractOrderId(parsed.text || '');
                  
-                 // If not found, we might need OCR/PDF text extraction (omitted for MVP speed, using pdf-parse later if needed)
+                 // New requirement: GIG verification link
+                 const gigLinkRegex = /https:\/\/belgedogrulama\.gig\.com\.tr\/sfsdocumentshow\/\?documentid=[^&\s]+(?:&exportpdf=1)?/i;
+                 const gigLinkMatch = (parsed.text || "").match(gigLinkRegex);
+                 
+                 if (gigLinkMatch) {
+                   const gigData = await extractFromGigLink(gigLinkMatch[0]);
+                   if (gigData) {
+                     await storage.createJob({
+                       orderId: 'UNKNOWN',
+                       attachmentId: attachmentRecord.id,
+                       status: 'QUEUED',
+                       insuredNameRaw: gigData.insuredName,
+                       insuredNameNorm: normalizeName(gigData.insuredName),
+                       amountCents: gigData.amountCents
+                     });
+                     await storage.updateEmailStatus(emailRecord.id, 'PROCESSED', 'UNKNOWN');
+                     continue; // Skip the default processing if GIG link handled it
+                   }
+                 }
                  
                  if (orderId) {
                    await storage.createJob({
