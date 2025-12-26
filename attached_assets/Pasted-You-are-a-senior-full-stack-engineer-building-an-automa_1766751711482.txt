@@ -1,0 +1,136 @@
+You are a senior full-stack engineer building an automation product on Replit.
+
+GOAL
+Build an MVP service that:
+1) Connects to an email inbox (IMAP) and polls for new PTTAVM order emails.
+2) Downloads PDF attachments to local storage.
+3) Extracts an ORDER_ID from email subject/body OR from the PDF content (regex-based).
+4) Matches ORDER_ID to the corresponding order in PTTAVM Seller Dashboard.
+5) Uploads the PDF to the correct place for that order (via browser automation using Playwright).
+6) Provides a small admin web UI to monitor jobs, logs, success/failure, and manual retry/remap.
+
+IMPORTANT CONSTRAINTS
+- Do NOT attempt to bypass CAPTCHA, MFA, or security controls. If encountered, stop and mark the job as "NEEDS_MANUAL_ACTION".
+- Store secrets in Replit Secrets only. Never hardcode credentials.
+- Minimize logging of PII; redact email addresses and any identity numbers if they appear.
+- Be resilient: retries with exponential backoff, idempotency (do not upload same PDF twice for same order).
+- Assume no official PTTAVM API exists; implement with Playwright selectors. However, structure code so that if an API is discovered later, uploader can be swapped.
+
+TECH STACK
+- Node.js 20 + TypeScript
+- Express for admin UI + simple pages (server-rendered is OK) OR a minimal React UI if easy.
+- SQLite (better-sqlite3) for MVP persistence (jobs, attachments, mapping, logs).
+- Playwright for browser automation.
+- IMAP client library (e.g., imapflow) for email polling.
+- PDF text extraction (pdf-parse). If text extraction fails, fall back to filename/subject parsing only (no OCR in MVP).
+
+DATA MODEL (SQLite)
+Tables:
+- emails(id, messageId, fromAddr, subject, receivedAt, processedAt, rawOrderId, status)
+- attachments(id, emailId, filename, filepath, sha256, size, createdAt)
+- jobs(id, orderId, attachmentId, status, attempts, lastError, createdAt, updatedAt)
+- uploads(id, jobId, pttOrderId, uploadedAt, result, evidencePath)
+- mappings(id, extractedOrderId, normalizedOrderId, createdAt)  // optional manual mapping overrides
+
+STATUS ENUMS
+Email: NEW, PROCESSED, ERROR
+Job: QUEUED, RUNNING, SUCCESS, FAILED, NEEDS_MANUAL_ACTION
+
+ORDER_ID EXTRACTION
+Implement a robust extractor:
+- Try subject regexes: /(sipariş|siparis|order)\s*[:#-]?\s*([A-Z0-9-]{6,})/i
+- Try body text with similar regexes
+- Try PDF text with similar regexes
+- Normalize: uppercase, remove spaces, keep hyphens.
+
+PTTAVM UPLOADER (Playwright)
+Implement in src/ptt/uploader.ts:
+- login(baseUrl, username, password)
+- navigate to orders page
+- search for orderId
+- open order detail
+- upload the PDF to the required upload field (make this configurable selector in config)
+- confirm success (look for success toast or presence of uploaded filename)
+- take evidence screenshots to /evidence with jobId (before upload, after upload, error state)
+
+Because selectors may change, create a config file:
+src/config/pttSelectors.ts
+with CSS/XPath selectors for:
+- username input
+- password input
+- login button
+- orders search input
+- order row click
+- upload button/input[type=file]
+- success toast
+
+ADMIN UI
+Routes:
+GET / -> dashboard summary (counts by status)
+GET /jobs -> list jobs with filters
+GET /jobs/:id -> job detail + logs + evidence screenshots
+POST /jobs/:id/retry -> retry
+POST /mappings -> create manual mapping (extractedOrderId -> normalizedOrderId)
+
+BACKGROUND WORKER
+- A poller runs every N seconds:
+  - fetch unread emails matching criteria (subject contains "PTTAVM" OR has PDF attachments)
+  - store email metadata
+  - download attachments
+  - create a job per attachment with extracted orderId
+- A worker processes queued jobs sequentially (MVP) to avoid account lockouts.
+- Concurrency configurable (default 1).
+
+CONFIG (ENV via Replit Secrets)
+IMAP_HOST=
+IMAP_PORT=
+IMAP_SECURE=true/false
+IMAP_USER=
+IMAP_PASS=
+IMAP_MAILBOX=INBOX
+EMAIL_POLL_INTERVAL_SECONDS=60
+
+PTT_BASE_URL=  (seller dashboard base)
+PTT_USERNAME=
+PTT_PASSWORD=
+PTT_HEADLESS=true
+PTT_SLOWMO_MS=0
+
+APP_PORT=3000
+DATA_DIR=./data
+
+DELIVERABLES
+1) Working Replit project with TypeScript build/run.
+2) README with:
+   - how to set secrets
+   - how to run locally on Replit
+   - how to test using a “fixtures” folder with sample .eml or mocked extraction
+   - troubleshooting (CAPTCHA/MFA handling, selector updates)
+3) Clear file structure:
+src/
+  app.ts
+  db/
+  email/
+  extractor/
+  ptt/
+  worker/
+  ui/
+  config/
+4) Add a "DRY_RUN" mode:
+DRY_RUN=true => do not actually upload, only simulate navigation + screenshots.
+
+IMPLEMENTATION STEPS (DO THEM)
+- Initialize Node+TS, add scripts: dev, build, start
+- Create SQLite schema migration on startup
+- Implement IMAP fetcher with imapflow
+- Implement attachment saving + sha256 hashing
+- Implement order extractor
+- Implement job queue and worker loop
+- Implement Playwright uploader with DRY_RUN
+- Implement admin UI pages
+- Add minimal validation and error handling
+
+ACCEPTANCE TEST
+- When a test email with a PDF containing an orderId arrives, the system creates a job and attempts upload.
+- If upload succeeds, job becomes SUCCESS, upload record created, evidence screenshots stored.
+- If CAPTCHA/MFA appears, job becomes NEEDS_MANUAL_ACTION and stops.
