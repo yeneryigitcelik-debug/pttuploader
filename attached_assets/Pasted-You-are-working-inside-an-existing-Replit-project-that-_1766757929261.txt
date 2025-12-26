@@ -1,0 +1,123 @@
+You are working inside an existing Replit project that currently includes:
+- IMAP poller (server/services/imap.ts)
+- extractor (server/services/extractor.ts)
+- Playwright PTT uploader (server/services/ptt.ts)
+- worker/job queue (server/services/worker.ts)
+- admin UI (dashboard/jobs/mappings)
+- SQLite
+
+NEW DIRECTION
+We are pausing email automation. Do NOT use Gmail/IMAP/OAuth.
+
+We want a MANUAL-INPUT workflow:
+- User manually downloads PDFs to their computer.
+- User then either:
+  A) Uploads PDFs via the Admin UI (drag/drop / file picker), OR
+  B) Uploads PDFs by placing them into a watched folder path on the server (optional).
+- The app extracts:
+  - insured full name (name+surname)
+  - policy amount (TRY)
+- Then the app matches each PDF to PTTAVM Orders using ONLY:
+  1) Name/Surname
+  2) Amount shown on orders page
+- If exactly 1 match => auto upload to that order via Playwright.
+- If 0 or >1 matches => NEEDS_MANUAL_ACTION with candidate list, no upload.
+
+DO NOT attempt to bypass CAPTCHA/MFA. If encountered => NEEDS_MANUAL_ACTION.
+
+IMPLEMENTATION REQUIREMENTS
+
+1) Remove/disable IMAP
+- Disable server/services/imap.ts polling and any startup call that depends on IMAP_* envs.
+- Update README: IMAP secrets no longer required.
+
+2) Upload intake (Admin UI)
+- Add a page or section in Admin UI: "Upload PDFs"
+- Allow selecting multiple PDFs and uploading them to the server:
+  - Endpoint: POST /api/uploads (multipart/form-data)
+  - Save under DATA_DIR/uploads/<timestamp>_<originalname>.pdf
+  - Compute sha256 and store in DB
+  - For each uploaded PDF, create a job record (status QUEUED)
+
+3) Extraction from PDF
+- In server/services/extractor.ts implement robust PDF parsing:
+  - Extract insured full name (Sigortalı / Ad Soyad) via regex patterns
+  - Extract amount (TRY) via regex patterns; parse "1.234,56" and "1234.56"
+  - Convert amount to integer cents (kuruş) (e.g., 1234.56 -> 123456)
+  - Normalize name:
+    - uppercase
+    - trim/collapse spaces
+    - remove punctuation
+    - normalize Turkish chars: İ->I, I/ı->I, Ş->S, Ğ->G, Ü->U, Ö->O, Ç->C
+- Store in job: insured_name_raw, insured_name_norm, amount_cents
+
+4) PTTAVM matching by Name + Amount
+- In server/services/ptt.ts implement:
+  - fetchOrderCandidates(page): scrape Orders list rows (orderId/orderNo, customerName, amount)
+  - Normalize row customer name the same way.
+  - Parse row amount into cents.
+  - Candidate selection logic:
+    a) filter by name_norm equals
+    b) among them exact amount match (cents equality)
+       - if exactly 1 => AUTO
+       - if >1 => MANUAL
+       - if 0 => try tolerance
+    c) tolerance: within +/- MATCH_AMOUNT_TOLERANCE_CENTS (default 100)
+       - if exactly 1 => AUTO
+       - else => MANUAL
+- Store candidates in DB as candidates_json for UI review.
+
+IMPORTANT: Orders list may paginate. Add env PTT_MAX_PAGES_TO_SCAN default 5.
+Stop early if a unique match is found.
+
+5) Upload
+- If AUTO decision:
+  - navigate to that order detail
+  - upload PDF (existing upload selector)
+  - verify success (toast or uploaded filename)
+  - store upload record + evidence screenshots.
+- Idempotency:
+  - never upload same PDF twice to same order:
+    enforce unique constraint on (orderId, attachment_sha256)
+
+6) Manual resolution workflow
+- Jobs detail page must show:
+  - extracted name (masked) and amount
+  - match decision + reason
+  - candidate list: orderId, masked customer, amount
+- Add action:
+  - POST /jobs/:id/select-and-upload { orderId }
+  - This should perform upload for the selected order (respect idempotency)
+
+7) DRY_RUN
+- Keep DRY_RUN:
+  - In DRY_RUN=true, do not upload, but still scrape candidates and produce evidence screenshots.
+
+8) Secrets / Env
+- Remove IMAP_* requirements.
+- Keep:
+  - PTT_BASE_URL
+  - PTT_USERNAME
+  - PTT_PASSWORD
+  - PTT_HEADLESS=true
+  - MATCH_AMOUNT_TOLERANCE_CENTS=100 (default)
+  - PTT_MAX_PAGES_TO_SCAN=5 (default)
+  - DATA_DIR=./data
+
+9) README update
+- Explain manual workflow:
+  - Step 1: Open Admin UI -> Upload PDFs
+  - Step 2: Monitor jobs
+  - Step 3: If MANUAL, select candidate and upload
+- Explain selectors config in server/config/pttSelectors.ts
+- Explain common failures (CAPTCHA/MFA, selector changes, ambiguous matches)
+
+DELIVERABLES
+- Implement code changes fully (backend + UI + DB migration).
+- Add unit tests for:
+  - name normalization
+  - amount parsing
+  - match decision logic (unique exact, unique tolerance, ambiguous, none)
+- Summarize what was changed and which env vars are required.
+
+Do not ask questions; make reasonable assumptions and keep selectors configurable.
