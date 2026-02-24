@@ -26,6 +26,12 @@ export const selectors = {
   },
 
   orders: {
+    // ======= SOL MENU NAVIGASYON =======
+    // Siparisler sayfasina gitmek icin sol menudeki link
+    // <span class="MuiTypography-root MuiListItemText-primary ...">Siparişler</span>
+    sidebarOrdersLink: 'span.MuiListItemText-primary',
+    sidebarOrdersText: 'Siparişler',
+
     // ======= TABLO =======
     // Her siparis satiri
     row: 'tr[data-testid^="MuiDataTableBodyRow"]',
@@ -34,8 +40,8 @@ export const selectors = {
     // Musteri adi - column 6 (dogrulanmis: "ilksen Gulerman")
     customerNameCell: 'td[data-testid^="MuiDataTableBodyCell-6-"]',
 
-    // Siparis numarasi - link iceren hucre (orn: "PTT-0ANNM033I-240226")
-    // Tablo icerisinde a etiketi icindeki text
+    // Siparis numarasi - link iceren hucre (orn: "PTT-0BA8SC81O-240226")
+    // <b style="white-space: nowrap;">PTT-0BA8SC81O-240226</b>
     orderIdCell: 'td[data-testid^="MuiDataTableBodyCell-2-"] a, td[data-testid^="MuiDataTableBodyCell-1-"] a',
 
     // Sepet numarasi - ilk data sutunu
@@ -56,17 +62,34 @@ export const selectors = {
     filterButton: 'button[aria-label="Filter Table"], button[aria-label="Filter"]',
 
     // ======= SAYFALAMA =======
-    nextPageBtn: 'button[aria-label="Next page"], .MuiTablePagination-actions button:last-child',
+    // <button id="pagination-next" data-testid="pagination-next" aria-label="Sonraki Sayfa">
+    nextPageBtn: '#pagination-next',
     prevPageBtn: 'button[aria-label="Previous page"], .MuiTablePagination-actions button:first-child',
-    rowsPerPageSelect: '.MuiTablePagination-select',
+    // <div id="pagination-rows" data-testid="pagination-rows">10</div>
+    rowsPerPageSelect: '#pagination-rows',
 
     // ======= SIPARIS DETAY SAYFASI =======
     // Siparis detaya gitmek icin satirdaki linke tikla
     orderDetailLink: 'a[href*="/order-management/"]',
 
-    // PDF yukleme alani (siparis detay sayfasinda)
-    uploadButton: 'button:has-text("Yükle"), button:has-text("Dosya Ekle"), button:has-text("Upload"), input[type="file"] + button',
-    fileInput: 'input[type="file"]',
+    // ======= PDF YUKLEME (siparis detay sayfasi) =======
+    // <input type="file" accept="application/pdf" id="new_invoice_file">
+    fileInput: '#new_invoice_file',
+    // <span class="MuiButton-label">Yükle</span>
+    uploadButton: 'span.MuiButton-label:text("Yükle")',
+    uploadButtonFallback: '//span[contains(@class,"MuiButton-label") and text()="Yükle"]/..',
+
+    // ======= GONDERILDI / TESLIM EDILDI ISARETLE =======
+    // <span class="MuiButton-label">GÖNDERİLDİ OLARAK İŞARETLE</span>
+    markAsSentButton: 'span.MuiButton-label:text("GÖNDERİLDİ OLARAK İŞARETLE")',
+    markAsSentButtonFallback: '//span[contains(@class,"MuiButton-label") and text()="GÖNDERİLDİ OLARAK İŞARETLE"]/..',
+    // Onay dialogunda tekrar ayni butona basilir
+    markAsSentConfirmButton: 'span.MuiButton-label:text("GÖNDERİLDİ OLARAK İŞARETLE")',
+
+    // Teslim edildi olarak isaretleme (gonderildi sonrasi)
+    markAsDeliveredButton: 'span.MuiButton-label:text("TESLİM EDİLDİ OLARAK İŞARETLE")',
+    markAsDeliveredButtonFallback: '//span[contains(@class,"MuiButton-label") and text()="TESLİM EDİLDİ OLARAK İŞARETLE"]/..',
+    markAsDeliveredConfirmButton: 'span.MuiButton-label:text("TESLİM EDİLDİ OLARAK İŞARETLE")',
 
     // Basari bildirimi
     successToast: '.MuiAlert-standardSuccess, .MuiSnackbar-root .MuiAlert-message, [role="alert"]',
