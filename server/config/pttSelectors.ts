@@ -18,8 +18,10 @@
 export const selectors = {
   login: {
     // tedarikci.pttavm.com login sayfasi
-    usernameInput: 'input[type="email"], input[name="email"], input[name="userName"]',
-    passwordInput: 'input[type="password"]',
+    // <input id="email" class="_input_mlg16_33" type="email" name="email">
+    usernameInput: '#email',
+    // <input id="password" class="_input_mlg16_33" type="password" name="password">
+    passwordInput: '#password',
     submitButton: 'button[type="submit"]',
   },
 
