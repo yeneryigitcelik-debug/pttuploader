@@ -1,11 +1,10 @@
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/sql-js";
+import initSqlJs from "sql.js";
 import * as schema from "@shared/schema";
 import path from "path";
 import fs from "fs";
 
 function getDbPath(): string {
-  // Use ./data directory for the SQLite database
   const dataDir = path.join(process.cwd(), "data");
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
@@ -14,14 +13,26 @@ function getDbPath(): string {
 }
 
 const dbPath = getDbPath();
-const sqlite = new Database(dbPath);
-sqlite.pragma("journal_mode = WAL");
-sqlite.pragma("foreign_keys = ON");
+
+// sql.js requires async initialization (top-level await works with "type": "module")
+const SQL = await initSqlJs();
+
+let sqlite: InstanceType<typeof SQL.Database>;
+if (fs.existsSync(dbPath)) {
+  const buffer = fs.readFileSync(dbPath);
+  sqlite = new SQL.Database(buffer);
+} else {
+  sqlite = new SQL.Database();
+}
+
+// Enable WAL mode and foreign keys
+sqlite.run("PRAGMA journal_mode = WAL");
+sqlite.run("PRAGMA foreign_keys = ON");
 
 export const db = drizzle(sqlite, { schema });
 
 // Auto-create tables
-sqlite.exec(`
+sqlite.run(`
   CREATE TABLE IF NOT EXISTS emails (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     message_id TEXT NOT NULL UNIQUE,
@@ -76,5 +87,20 @@ sqlite.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);
+
+/** Save the in-memory database to disk */
+export function saveDb(): void {
+  const data = sqlite.export();
+  const buffer = Buffer.from(data);
+  fs.writeFileSync(dbPath, buffer);
+}
+
+// Auto-save on process exit
+function gracefulSave() {
+  try { saveDb(); } catch { /* ignore errors during shutdown */ }
+}
+process.on("exit", gracefulSave);
+process.on("SIGINT", () => { gracefulSave(); process.exit(); });
+process.on("SIGTERM", () => { gracefulSave(); process.exit(); });
 
 console.log(`Database initialized at: ${dbPath}`);
