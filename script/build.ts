@@ -5,7 +5,7 @@ import { rm, readFile } from "fs/promises";
 // Server deps to bundle
 const allowlist = [
   "axios",
-  "better-sqlite3",
+  "sql.js",
   "date-fns",
   "drizzle-orm",
   "drizzle-zod",
@@ -29,8 +29,8 @@ async function buildAll() {
     ...Object.keys(pkg.devDependencies || {}),
   ];
   const externals = allDeps.filter((dep) => !allowlist.includes(dep));
-  // Always externalize native modules
-  externals.push("better-sqlite3");
+  // Externalize sql.js (uses WASM)
+  externals.push("sql.js");
 
   await esbuild({
     entryPoints: ["server/index.ts"],

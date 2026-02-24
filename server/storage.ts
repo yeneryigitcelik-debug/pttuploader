@@ -1,4 +1,4 @@
-import { db } from "./db";
+import { db, saveDb } from "./db";
 import {
   emails, attachments, jobs, uploads, mappings,
   type Email, type InsertEmail,
@@ -48,6 +48,7 @@ export class DatabaseStorage implements IStorage {
       ...email,
       receivedAt: email.receivedAt instanceof Date ? email.receivedAt.toISOString() : email.receivedAt,
     }).returning();
+    saveDb();
     return newEmail;
   }
 
@@ -65,11 +66,13 @@ export class DatabaseStorage implements IStorage {
       .set({ status, rawOrderId, processedAt: status === 'PROCESSED' ? new Date().toISOString() : undefined })
       .where(eq(emails.id, id))
       .returning();
+    saveDb();
     return updated;
   }
 
   async createAttachment(attachment: InsertAttachment): Promise<Attachment> {
     const [newAttachment] = await db.insert(attachments).values(attachment).returning();
+    saveDb();
     return newAttachment;
   }
 
@@ -79,6 +82,7 @@ export class DatabaseStorage implements IStorage {
 
   async createJob(job: InsertJob): Promise<Job> {
     const [newJob] = await db.insert(jobs).values(job).returning();
+    saveDb();
     return newJob;
   }
 
@@ -122,6 +126,7 @@ export class DatabaseStorage implements IStorage {
       .set({ ...updates, updatedAt: new Date().toISOString() })
       .where(eq(jobs.id, id))
       .returning();
+    saveDb();
     return updated;
   }
 
@@ -142,6 +147,7 @@ export class DatabaseStorage implements IStorage {
 
   async createUpload(upload: InsertUpload): Promise<Upload> {
     const [newUpload] = await db.insert(uploads).values(upload).returning();
+    saveDb();
     return newUpload;
   }
 
@@ -151,6 +157,7 @@ export class DatabaseStorage implements IStorage {
 
   async createMapping(mapping: InsertMapping): Promise<Mapping> {
     const [newMapping] = await db.insert(mappings).values(mapping).returning();
+    saveDb();
     return newMapping;
   }
 
