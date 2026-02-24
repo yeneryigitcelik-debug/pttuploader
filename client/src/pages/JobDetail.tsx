@@ -4,8 +4,10 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, ArrowLeft, RefreshCw, FileText, Image as ImageIcon, Terminal, User, Banknote, Upload } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Loader2, ArrowLeft, RefreshCw, FileText, Image as ImageIcon, Terminal, User, Banknote, Upload, Search } from "lucide-react";
 import { format } from "date-fns";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 
@@ -29,6 +31,7 @@ export default function JobDetail() {
   const { toast } = useToast();
 
   const candidates = job?.candidatesJson ? JSON.parse(job.candidatesJson as string) : [];
+  const [manualOrderId, setManualOrderId] = useState('');
 
   if (isLoading) {
     return (
@@ -170,42 +173,85 @@ export default function JobDetail() {
             </CardContent>
           </Card>
 
-          {job.status === "NEEDS_MANUAL_ACTION" && candidates.length > 0 && (
+          {job.status === "NEEDS_MANUAL_ACTION" && (
             <Card className="shadow-md border-border/50 border-amber-200 dark:border-amber-800">
               <CardHeader>
-                <CardTitle className="text-lg text-amber-700 dark:text-amber-400">Select Order</CardTitle>
-                <CardDescription>Choose the correct PTTAVM order for this PDF.</CardDescription>
+                <CardTitle className="text-lg text-amber-700 dark:text-amber-400">
+                  {candidates.length > 0 ? 'Sipariş Seç' : 'Manuel Sipariş Girişi'}
+                </CardTitle>
+                <CardDescription>
+                  {candidates.length > 0
+                    ? `${candidates.length} aday bulundu. Doğru siparişi seçin.`
+                    : 'Eşleşen sipariş bulunamadı. Sipariş numarasını elle girin.'
+                  }
+                </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-2">
-                {candidates.map((candidate: any, idx: number) => (
-                  <div 
-                    key={idx}
-                    className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border border-border/50"
-                    data-testid={`candidate-${idx}`}
-                  >
-                    <div className="space-y-1">
-                      <p className="font-medium text-sm">{candidate.orderId}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {maskName(candidate.customerName)} - {formatCents(candidate.amountCents)}
-                      </p>
+              <CardContent className="space-y-3">
+                {candidates.length > 0 ? (
+                  candidates.map((candidate: any, idx: number) => (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border border-border/50"
+                      data-testid={`candidate-${idx}`}
+                    >
+                      <div className="space-y-1">
+                        <p className="font-medium text-sm">{candidate.orderId}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {maskName(candidate.customerName)} - {formatCents(candidate.amountCents)}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          selectCandidate({ jobId: job.id, orderId: candidate.orderId }, {
+                            onSuccess: () => {
+                              toast({ title: "Sipariş Seçildi", description: "İş tekrar işlenecek." });
+                            }
+                          });
+                        }}
+                        disabled={isSelecting}
+                        data-testid={`button-select-${idx}`}
+                      >
+                        {isSelecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4 mr-1" />}
+                        Yükle
+                      </Button>
+                    </div>
+                  ))
+                ) : null}
+
+                {/* Manuel siparis numarasi girisi */}
+                <Separator />
+                <div className="space-y-2">
+                  <span className="text-xs text-muted-foreground uppercase tracking-wider">
+                    Sipariş Numarasını Elle Girin
+                  </span>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="PTT-XXXXXXXXX-XXXXXX"
+                        value={manualOrderId}
+                        onChange={(e) => setManualOrderId(e.target.value)}
+                        className="pl-9 font-mono text-sm"
+                      />
                     </div>
                     <Button
-                      size="sm"
                       onClick={() => {
-                        selectCandidate({ jobId: job.id, orderId: candidate.orderId }, {
+                        if (!manualOrderId.trim()) return;
+                        selectCandidate({ jobId: job.id, orderId: manualOrderId.trim() }, {
                           onSuccess: () => {
-                            toast({ title: "Order Selected", description: "Job will be re-processed." });
+                            toast({ title: "Sipariş Atandı", description: `${manualOrderId} siparişine yüklenecek.` });
+                            setManualOrderId('');
                           }
                         });
                       }}
-                      disabled={isSelecting}
-                      data-testid={`button-select-${idx}`}
+                      disabled={isSelecting || !manualOrderId.trim()}
                     >
                       {isSelecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4 mr-1" />}
-                      Upload
+                      Yükle
                     </Button>
                   </div>
-                ))}
+                </div>
               </CardContent>
             </Card>
           )}

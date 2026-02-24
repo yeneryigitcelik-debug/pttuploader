@@ -52,6 +52,25 @@ export async function findOrderCandidates(page: Page, insuredNameNormalized: str
 
   const candidates: Candidate[] = [];
 
+  // Sayfa basina 100 kayit goster (varsayilan 10)
+  // #pagination-rows dropdown'unu tiklayip 100 secenegini sec
+  try {
+    const rowsPerPage = await page.$(selectors.orders.rowsPerPageSelect);
+    if (rowsPerPage) {
+      await rowsPerPage.click();
+      await page.waitForTimeout(500);
+      // MUI Select menu'sunden 100 secenegini tikla
+      const option100 = await page.$('li[data-value="100"], [role="option"]:has-text("100")');
+      if (option100) {
+        await option100.click();
+        await page.waitForLoadState('networkidle');
+        await page.waitForSelector(selectors.orders.row, { timeout: 15000 }).catch(() => null);
+      }
+    }
+  } catch (err) {
+    console.log('Rows per page 100 secilemedi, varsayilan ile devam ediliyor:', err);
+  }
+
   for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
     // Tablonun yuklenmesini bekle
     await page.waitForSelector(selectors.orders.row, { timeout: 10000 }).catch(() => null);
