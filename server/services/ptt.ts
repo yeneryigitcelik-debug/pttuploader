@@ -1,72 +1,135 @@
 import { chromium, type Page } from 'playwright';
-import { selectors } from '../config/pttSelectors';
+import { selectors, getCellSelector } from '../config/pttSelectors';
 import path from 'path';
 import fs from 'fs';
 import { normalizeName } from './extractor';
 
+const PTT_BASE_URL = 'https://tedarikci.pttavm.com';
+const ORDERS_URL = `${PTT_BASE_URL}/app/order-management/orders`;
+
 export interface Candidate {
   orderId: string;
+  basketId: string;
   customerName: string;
   amountCents: number;
 }
 
-export async function findOrderCandidates(page: Page, insuredNameNormalized: string, amountCents: number) {
-  const maxPages = Number(process.env.PTT_MAX_PAGES_TO_SCAN) || 5;
-  const tolerance = Number(process.env.MATCH_AMOUNT_TOLERANCE_CENTS) || 100;
-  
-  const candidates: Candidate[] = [];
-  
-  for (let i = 1; i <= maxPages; i++) {
-    const rows = await page.$$(selectors.orders.row);
-    for (const row of rows) {
-      const nameText = await row.$eval(selectors.orders.customerNameCell, el => el.textContent || "");
-      const amountText = await row.$eval(selectors.orders.amountCell, el => el.textContent || "");
-      const orderId = await row.$eval(selectors.orders.orderIdCell, el => el.textContent || "");
-      
-      const normalizedRowName = normalizeName(nameText);
-      // Simple amount parsing for row text (usually like "1.234,56 TL")
-      const rowAmountClean = amountText.replace(/[^\d,\.]/g, "").replace(/\./g, "").replace(",", ".");
-      const rowAmountCents = Math.round(parseFloat(rowAmountClean) * 100);
+/**
+ * PTTAVM paneline login yapar.
+ */
+async function loginToPttavm(page: Page): Promise<void> {
+  await page.goto(PTT_BASE_URL);
+  await page.waitForLoadState('networkidle');
 
-      if (normalizedRowName.includes(insuredNameNormalized) || insuredNameNormalized.includes(normalizedRowName)) {
-        candidates.push({ orderId, customerName: nameText, amountCents: rowAmountCents });
+  // Login form doldur
+  const usernameEl = await page.waitForSelector(selectors.login.usernameInput, { timeout: 10000 });
+  await usernameEl.fill(process.env.PTT_USERNAME || '');
+
+  const passwordEl = await page.waitForSelector(selectors.login.passwordInput, { timeout: 5000 });
+  await passwordEl.fill(process.env.PTT_PASSWORD || '');
+
+  await page.click(selectors.login.submitButton);
+  await page.waitForLoadState('networkidle');
+
+  // Login sonrasi siparis sayfasina git
+  await page.goto(ORDERS_URL);
+  await page.waitForSelector(selectors.orders.row, { timeout: 15000 });
+}
+
+/**
+ * MUI DataTable'daki siparisleri tarar ve musteri adina gore eslestirir.
+ * NOT: Tutar sutunu listede yok, sadece isim eslesmesi yapilir.
+ */
+export async function findOrderCandidates(page: Page, insuredNameNormalized: string, _amountCents: number) {
+  const maxPages = Number(process.env.PTT_MAX_PAGES_TO_SCAN) || 5;
+
+  const candidates: Candidate[] = [];
+
+  for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
+    // Tablonun yuklenmesini bekle
+    await page.waitForSelector(selectors.orders.row, { timeout: 10000 }).catch(() => null);
+
+    const rows = await page.$$(selectors.orders.row);
+
+    for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+      const row = rows[rowIdx];
+
+      // Musteri adi - MUI DataTable cell'inden oku
+      const nameCell = await row.$('td[data-testid^="MuiDataTableBodyCell-6-"]');
+      const nameText = nameCell ? (await nameCell.textContent() || '').trim() : '';
+
+      // Siparis numarasi - link icindeki text
+      const orderLink = await row.$('a[href*="/order-management/"]');
+      const orderId = orderLink ? (await orderLink.textContent() || '').trim() : '';
+
+      // Sepet numarasi
+      const basketCell = await row.$('td[data-testid^="MuiDataTableBodyCell-1-"]');
+      const basketId = basketCell ? (await basketCell.textContent() || '').trim() : '';
+
+      if (!nameText || !orderId) continue;
+
+      const normalizedRowName = normalizeName(nameText);
+
+      // Isim eslesmesi kontrol
+      if (
+        normalizedRowName.includes(insuredNameNormalized) ||
+        insuredNameNormalized.includes(normalizedRowName)
+      ) {
+        candidates.push({
+          orderId,
+          basketId,
+          customerName: nameText,
+          amountCents: 0, // Listede tutar yok
+        });
       }
     }
-    
-    // Check if next page exists and click
+
+    // Sonraki sayfaya gec
     const nextBtn = await page.$(selectors.orders.nextPageBtn);
     if (!nextBtn) break;
+
+    const isDisabled = await nextBtn.isDisabled();
+    if (isDisabled) break;
+
     await nextBtn.click();
     await page.waitForLoadState('networkidle');
   }
 
-  // Matching Logic
-  const exactMatches = candidates.filter(c => c.amountCents === amountCents);
-  if (exactMatches.length === 1) {
-    return { decision: "AUTO_UPLOAD", selectedOrderId: exactMatches[0].orderId, candidates };
+  // Eslestirme karari
+  if (candidates.length === 1) {
+    return {
+      decision: 'AUTO_UPLOAD' as const,
+      selectedOrderId: candidates[0].orderId,
+      reason: `Tek eslesme: ${candidates[0].customerName}`,
+      candidates,
+    };
   }
-  if (exactMatches.length > 1) {
-    return { decision: "MANUAL", reason: "Multiple exact amount matches", candidates };
+  if (candidates.length > 1) {
+    return {
+      decision: 'MANUAL' as const,
+      reason: `${candidates.length} aday bulundu, manuel secim gerekli`,
+      candidates,
+    };
   }
-
-  const toleranceMatches = candidates.filter(c => Math.abs(c.amountCents - amountCents) <= tolerance);
-  if (toleranceMatches.length === 1) {
-    return { decision: "AUTO_UPLOAD", selectedOrderId: toleranceMatches[0].orderId, candidates };
-  }
-  
-  return { 
-    decision: "MANUAL", 
-    reason: toleranceMatches.length > 1 ? "Multiple candidates within tolerance" : "No suitable match found", 
-    candidates 
+  return {
+    decision: 'MANUAL' as const,
+    reason: 'Eslesen siparis bulunamadi',
+    candidates: [],
   };
 }
 
-export async function uploadPdf(orderId: string, filePath: string): Promise<{ success: boolean; error?: string; evidence?: string }> {
-  const browser = await chromium.launch({ 
-    headless: process.env.PTT_HEADLESS !== 'false', // Default true
-    slowMo: Number(process.env.PTT_SLOWMO_MS) || 0
+/**
+ * Verilen siparis numarasina PDF yukler.
+ */
+export async function uploadPdf(
+  orderId: string,
+  filePath: string
+): Promise<{ success: boolean; error?: string; evidence?: string }> {
+  const browser = await chromium.launch({
+    headless: process.env.PTT_HEADLESS !== 'false',
+    slowMo: Number(process.env.PTT_SLOWMO_MS) || 0,
   });
-  
+
   const evidenceDir = path.join(process.cwd(), 'data', 'evidence');
   if (!fs.existsSync(evidenceDir)) {
     fs.mkdirSync(evidenceDir, { recursive: true });
@@ -75,49 +138,66 @@ export async function uploadPdf(orderId: string, filePath: string): Promise<{ su
   try {
     const context = await browser.newContext();
     const page = await context.newPage();
-    
+
     // Login
-    await page.goto(process.env.PTT_BASE_URL || 'https://seller.pttavm.com');
-    await page.fill(selectors.login.usernameInput, process.env.PTT_USERNAME || '');
-    await page.fill(selectors.login.passwordInput, process.env.PTT_PASSWORD || '');
-    await page.click(selectors.login.submitButton);
+    await loginToPttavm(page);
+
+    // Arama yap - once arama ikonuna tikla (MUI DataTable search)
+    const searchIcon = await page.$(selectors.orders.searchIcon);
+    if (searchIcon) {
+      await searchIcon.click();
+      await page.waitForTimeout(500);
+    }
+
+    // Arama kutusunu bul ve siparis no yaz
+    const searchInput = await page.waitForSelector(selectors.orders.searchInput, { timeout: 5000 });
+    await searchInput.fill(orderId);
+    await searchInput.press('Enter');
     await page.waitForLoadState('networkidle');
 
-    // Search Order
-    // Navigate to orders page if not there
-    await page.fill(selectors.orders.searchInput, orderId);
-    await page.press(selectors.orders.searchInput, 'Enter');
-    
-    // Wait for results
-    await page.waitForSelector(selectors.orders.row);
-    await page.click(selectors.orders.row); // Click first result
+    // Sonuclari bekle
+    await page.waitForSelector(selectors.orders.row, { timeout: 10000 });
 
-    // Upload
-    // Screenshot before
+    // Ilk sonuca tikla - siparis detay sayfasina git
+    const orderLink = await page.$(selectors.orders.orderDetailLink);
+    if (orderLink) {
+      await orderLink.click();
+    } else {
+      await page.click(selectors.orders.row);
+    }
+    await page.waitForLoadState('networkidle');
+
+    // Screenshot - oncesi
     const beforeShot = path.join(evidenceDir, `${orderId}-before.png`);
-    await page.screenshot({ path: beforeShot });
+    await page.screenshot({ path: beforeShot, fullPage: true });
 
     if (process.env.DRY_RUN === 'true') {
-      console.log(`[DRY RUN] Would upload ${filePath} for order ${orderId}`);
+      console.log(`[DRY RUN] ${filePath} -> siparis ${orderId}`);
       return { success: true, evidence: beforeShot };
     }
 
-    // Real upload
-    const fileChooserPromise = page.waitForEvent('filechooser');
-    await page.click(selectors.orders.uploadButton);
-    const fileChooser = await fileChooserPromise;
-    await fileChooser.setFiles(filePath);
-    
-    // Wait for success toast
-    await page.waitForSelector(selectors.orders.successToast);
-    
+    // PDF yukle - input[type="file"] varsa dogrudan set et
+    const fileInput = await page.$(selectors.orders.fileInput);
+    if (fileInput) {
+      await fileInput.setInputFiles(filePath);
+    } else {
+      // File chooser uzerinden yukle
+      const fileChooserPromise = page.waitForEvent('filechooser');
+      await page.click(selectors.orders.uploadButton);
+      const fileChooser = await fileChooserPromise;
+      await fileChooser.setFiles(filePath);
+    }
+
+    // Basari bildirimini bekle
+    await page.waitForSelector(selectors.orders.successToast, { timeout: 15000 });
+
+    // Screenshot - sonrasi
     const afterShot = path.join(evidenceDir, `${orderId}-after.png`);
-    await page.screenshot({ path: afterShot });
+    await page.screenshot({ path: afterShot, fullPage: true });
 
     return { success: true, evidence: afterShot };
-
   } catch (err: any) {
-    console.error("Playwright Error:", err);
+    console.error('Playwright Error:', err);
     return { success: false, error: err.message };
   } finally {
     await browser.close();
