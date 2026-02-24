@@ -32,7 +32,14 @@ async function loginToPttavm(page: Page): Promise<void> {
   await page.waitForLoadState('networkidle');
 
   // Login sonrasi siparis sayfasina git
-  await page.goto(ORDERS_URL);
+  // Oncelikle sidebar'daki "Siparisler" linkini dene, yoksa dogrudan URL'e git
+  const sidebarLink = await page.$(`text="${selectors.orders.sidebarOrdersText}"`);
+  if (sidebarLink) {
+    await sidebarLink.click();
+    await page.waitForLoadState('networkidle');
+  } else {
+    await page.goto(ORDERS_URL);
+  }
   await page.waitForSelector(selectors.orders.row, { timeout: 15000 });
 }
 
@@ -176,22 +183,55 @@ export async function uploadPdf(
       return { success: true, evidence: beforeShot };
     }
 
-    // PDF yukle - input[type="file"] varsa dogrudan set et
-    const fileInput = await page.$(selectors.orders.fileInput);
-    if (fileInput) {
-      await fileInput.setInputFiles(filePath);
+    // 1) PDF dosyasini sec - input#new_invoice_file
+    const fileInput = await page.waitForSelector(selectors.orders.fileInput, { timeout: 10000 });
+    await fileInput.setInputFiles(filePath);
+
+    // 2) "Yukle" butonuna tikla
+    const uploadBtn = await page.$(`text="Yükle"`);
+    if (uploadBtn) {
+      await uploadBtn.click();
     } else {
-      // File chooser uzerinden yukle
-      const fileChooserPromise = page.waitForEvent('filechooser');
-      await page.click(selectors.orders.uploadButton);
-      const fileChooser = await fileChooserPromise;
-      await fileChooser.setFiles(filePath);
+      // XPath fallback
+      await page.click(selectors.orders.uploadButtonFallback);
+    }
+    await page.waitForLoadState('networkidle');
+
+    // Screenshot - yukleme sonrasi
+    const uploadShot = path.join(evidenceDir, `${orderId}-uploaded.png`);
+    await page.screenshot({ path: uploadShot, fullPage: true });
+
+    // 3) "GONDERILDI OLARAK ISARETLE" butonuna tikla
+    const markSentBtn = await page.$(`text="GÖNDERİLDİ OLARAK İŞARETLE"`);
+    if (markSentBtn) {
+      await markSentBtn.click();
+    } else {
+      await page.click(selectors.orders.markAsSentButtonFallback);
+    }
+    await page.waitForTimeout(1000);
+
+    // 4) Onay dialogunda tekrar "GONDERILDI OLARAK ISARETLE" tikla
+    const confirmSentBtn = await page.$(`text="GÖNDERİLDİ OLARAK İŞARETLE"`);
+    if (confirmSentBtn) {
+      await confirmSentBtn.click();
+    }
+    await page.waitForLoadState('networkidle');
+
+    // 5) "TESLIM EDILDI OLARAK ISARETLE" butonuna tikla
+    const markDeliveredBtn = await page.waitForSelector(`text="TESLİM EDİLDİ OLARAK İŞARETLE"`, { timeout: 10000 }).catch(() => null);
+    if (markDeliveredBtn) {
+      await markDeliveredBtn.click();
+      await page.waitForTimeout(1000);
+
+      // 6) Onay dialogunda tekrar tikla
+      const confirmDeliveredBtn = await page.$(`text="TESLİM EDİLDİ OLARAK İŞARETLE"`);
+      if (confirmDeliveredBtn) {
+        await confirmDeliveredBtn.click();
+      }
+      await page.waitForLoadState('networkidle');
     }
 
-    // Basari bildirimini bekle
-    await page.waitForSelector(selectors.orders.successToast, { timeout: 15000 });
-
-    // Screenshot - sonrasi
+    // Screenshot - sonrasi (tum islemler bitti)
     const afterShot = path.join(evidenceDir, `${orderId}-after.png`);
     await page.screenshot({ path: afterShot, fullPage: true });
 

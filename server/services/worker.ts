@@ -40,8 +40,14 @@ export async function startWorker() {
           await page.click(selectors.login.submitButton);
           await page.waitForLoadState('networkidle');
 
-          // Siparis listesine git
-          await page.goto(ORDERS_URL);
+          // Siparis listesine git - sidebar veya dogrudan URL
+          const sidebarLink = await page.$(`text="${selectors.orders.sidebarOrdersText}"`);
+          if (sidebarLink) {
+            await sidebarLink.click();
+            await page.waitForLoadState('networkidle');
+          } else {
+            await page.goto(ORDERS_URL);
+          }
           await page.waitForSelector(selectors.orders.row, { timeout: 15000 });
 
           const matchResult = await findOrderCandidates(page, job.insuredNameNorm, job.amountCents || 0);
