@@ -1,10 +1,8 @@
 import type { Express } from "express";
-import { createServer, type Server } from "http";
+import { type Server } from "http";
 import { storage } from "./storage";
 import { api } from "@shared/routes";
-import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import { startWorker } from "./services/worker";
-import { startImapPoller } from "./services/imap";
 import { extractFromPdfBuffer, normalizeName } from "./services/extractor";
 import { z } from "zod";
 import multer from "multer";
@@ -21,7 +19,7 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  fileFilter: (req, file, cb) => {
+  fileFilter: (_req, file, cb) => {
     if (file.mimetype === 'application/pdf') {
       cb(null, true);
     } else {
@@ -35,16 +33,12 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // Setup Auth
-  await setupAuth(app);
-  registerAuthRoutes(app);
-
-  // API Routes
+  // API Routes - no auth needed for desktop app
   app.get(api.jobs.list.path, async (req, res) => {
     const limit = req.query.limit ? Number(req.query.limit) : 50;
     const offset = req.query.offset ? Number(req.query.offset) : 0;
     const status = req.query.status as string | undefined;
-    
+
     const jobs = await storage.getJobs(limit, offset, status);
     res.json(jobs);
   });
@@ -54,10 +48,9 @@ export async function registerRoutes(
     if (!job) {
       return res.status(404).json({ message: "Job not found" });
     }
-    // Mock logs for now
     const logs = [`Job started at ${job.createdAt}`, `Status: ${job.status}`];
     if (job.lastError) logs.push(`Error: ${job.lastError}`);
-    
+
     res.json({ ...job, logs });
   });
 
@@ -66,10 +59,10 @@ export async function registerRoutes(
     if (!job) {
       return res.status(404).json({ message: "Job not found" });
     }
-    const updated = await storage.updateJob(job.id, { 
-      status: "QUEUED", 
-      attempts: 0, 
-      lastError: null 
+    const updated = await storage.updateJob(job.id, {
+      status: "QUEUED",
+      attempts: 0,
+      lastError: null
     });
     res.json(updated);
   });
@@ -80,7 +73,7 @@ export async function registerRoutes(
       return res.status(404).json({ message: "Job not found" });
     }
     const { orderId } = req.body;
-    const updated = await storage.updateJob(job.id, { 
+    const updated = await storage.updateJob(job.id, {
       orderId,
       status: "QUEUED",
       matchDecision: "MANUAL_SELECTED",
@@ -111,7 +104,7 @@ export async function registerRoutes(
         const timestamp = Date.now();
         const filename = `${timestamp}_${file.originalname}`;
         const filepath = path.join(UPLOADS_DIR, filename);
-        
+
         fs.writeFileSync(filepath, file.buffer);
 
         const extracted = await extractFromPdfBuffer(file.buffer);
@@ -120,7 +113,7 @@ export async function registerRoutes(
           messageId: `upload-${timestamp}-${sha256.substring(0, 8)}`,
           fromAddr: 'manual-upload',
           subject: file.originalname,
-          receivedAt: new Date(),
+          receivedAt: new Date().toISOString(),
           status: 'PROCESSED'
         });
 
@@ -167,46 +160,20 @@ export async function registerRoutes(
     }
   });
 
-  app.get(api.mappings.list.path, async (req, res) => {
+  app.get(api.mappings.list.path, async (_req, res) => {
     const mappings = await storage.getAllMappings();
     res.json(mappings);
   });
 
-  app.get(api.stats.get.path, async (req, res) => {
+  app.get(api.stats.get.path, async (_req, res) => {
     const stats = await storage.getStats();
     res.json(stats);
   });
 
-  // Start background services
+  // Start background worker
   if (process.env.NODE_ENV !== "test") {
-    console.log("Starting background services...");
+    console.log("Starting background worker...");
     startWorker().catch(err => console.error("Worker failed to start:", err));
-    startImapPoller().catch(err => console.error("IMAP poller failed to start:", err));
-    
-    // Seed data if empty
-    const stats = await storage.getStats();
-    if (Object.keys(stats.jobs).length === 0) {
-      console.log("Seeding database...");
-      const email = await storage.createEmail({
-        messageId: "seed-123",
-        fromAddr: "test@example.com",
-        subject: "PTTAVM Order #ABC123456",
-        receivedAt: new Date(),
-        status: "NEW"
-      });
-      const attachment = await storage.createAttachment({
-        emailId: email.id,
-        filename: "order.pdf",
-        filepath: "/tmp/order.pdf",
-        sha256: "dummyhash",
-        size: 1024
-      });
-      await storage.createJob({
-        orderId: "ABC123456",
-        attachmentId: attachment.id,
-        status: "QUEUED"
-      });
-    }
   }
 
   return httpServer;

@@ -1,32 +1,31 @@
-import { pgTable, text, serial, integer, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export * from "./models/auth";
-
-export const emails = pgTable("emails", {
-  id: serial("id").primaryKey(),
+export const emails = sqliteTable("emails", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   messageId: text("message_id").notNull().unique(),
   fromAddr: text("from_addr").notNull(),
   subject: text("subject"),
-  receivedAt: timestamp("received_at").notNull(),
-  processedAt: timestamp("processed_at"),
+  receivedAt: text("received_at").notNull(), // ISO string
+  processedAt: text("processed_at"),
   rawOrderId: text("raw_order_id"),
   status: text("status").notNull().default("NEW"), // NEW, PROCESSED, ERROR
 });
 
-export const attachments = pgTable("attachments", {
-  id: serial("id").primaryKey(),
+export const attachments = sqliteTable("attachments", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   emailId: integer("email_id").notNull().references(() => emails.id),
   filename: text("filename").notNull(),
   filepath: text("filepath").notNull(),
   sha256: text("sha256").notNull(),
   size: integer("size").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
 });
 
-export const jobs = pgTable("jobs", {
-  id: serial("id").primaryKey(),
+export const jobs = sqliteTable("jobs", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   orderId: text("order_id").notNull(),
   attachmentId: integer("attachment_id").notNull().references(() => attachments.id),
   status: text("status").notNull().default("QUEUED"), // QUEUED, RUNNING, SUCCESS, FAILED, NEEDS_MANUAL_ACTION
@@ -38,24 +37,24 @@ export const jobs = pgTable("jobs", {
   matchDecision: text("match_decision"),
   matchReason: text("match_reason"),
   candidatesJson: text("candidates_json"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+  updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
 });
 
-export const uploads = pgTable("uploads", {
-  id: serial("id").primaryKey(),
+export const uploads = sqliteTable("uploads", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   jobId: integer("job_id").notNull().references(() => jobs.id),
   pttOrderId: text("ptt_order_id").notNull(),
-  uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
+  uploadedAt: text("uploaded_at").notNull().default(sql`(datetime('now'))`),
   result: text("result").notNull(),
   evidencePath: text("evidence_path"),
 });
 
-export const mappings = pgTable("mappings", {
-  id: serial("id").primaryKey(),
+export const mappings = sqliteTable("mappings", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   extractedOrderId: text("extracted_order_id").notNull().unique(),
   normalizedOrderId: text("normalized_order_id").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
 });
 
 // Schemas

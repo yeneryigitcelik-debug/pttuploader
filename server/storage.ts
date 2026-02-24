@@ -1,14 +1,14 @@
 import { db } from "./db";
-import { 
+import {
   emails, attachments, jobs, uploads, mappings,
-  type Email, type InsertEmail, 
+  type Email, type InsertEmail,
   type Attachment, type InsertAttachment,
-  type Job, type InsertJob, 
+  type Job, type InsertJob,
   type Upload, type InsertUpload,
   type Mapping, type InsertMapping,
-  type JobStatus, type EmailStatus
+  type EmailStatus
 } from "@shared/schema";
-import { eq, desc, and, sql } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 
 export interface IStorage {
   // Emails
@@ -16,35 +16,38 @@ export interface IStorage {
   getEmailByMessageId(messageId: string): Promise<Email | undefined>;
   getUnprocessedEmails(): Promise<Email[]>;
   updateEmailStatus(id: number, status: EmailStatus, rawOrderId?: string): Promise<Email>;
-  
+
   // Attachments
   createAttachment(attachment: InsertAttachment): Promise<Attachment>;
   getAttachmentsByEmailId(emailId: number): Promise<Attachment[]>;
-  
+
   // Jobs
   createJob(job: InsertJob): Promise<Job>;
   getJob(id: number): Promise<Job | undefined>;
-  getJobWithDetails(id: number): Promise<Job & { attachment: Attachment, uploads: Upload[] }>;
+  getJobWithDetails(id: number): Promise<(Job & { attachment: Attachment, uploads: Upload[] }) | undefined>;
   getJobs(limit?: number, offset?: number, status?: string): Promise<(Job & { attachment: Attachment })[]>;
   updateJob(id: number, updates: Partial<Job>): Promise<Job>;
   getNextQueuedJob(): Promise<(Job & { attachment: Attachment }) | undefined>;
-  
+
   // Uploads
   createUpload(upload: InsertUpload): Promise<Upload>;
   getUploadsByJobId(jobId: number): Promise<Upload[]>;
-  
+
   // Mappings
   createMapping(mapping: InsertMapping): Promise<Mapping>;
   getMapping(extractedOrderId: string): Promise<Mapping | undefined>;
   getAllMappings(): Promise<Mapping[]>;
-  
+
   // Stats
   getStats(): Promise<{ jobs: Record<string, number>, emails: Record<string, number> }>;
 }
 
 export class DatabaseStorage implements IStorage {
   async createEmail(email: InsertEmail): Promise<Email> {
-    const [newEmail] = await db.insert(emails).values(email).returning();
+    const [newEmail] = await db.insert(emails).values({
+      ...email,
+      receivedAt: email.receivedAt instanceof Date ? email.receivedAt.toISOString() : email.receivedAt,
+    }).returning();
     return newEmail;
   }
 
@@ -59,7 +62,7 @@ export class DatabaseStorage implements IStorage {
 
   async updateEmailStatus(id: number, status: EmailStatus, rawOrderId?: string): Promise<Email> {
     const [updated] = await db.update(emails)
-      .set({ status, rawOrderId, processedAt: status === 'PROCESSED' ? new Date() : undefined })
+      .set({ status, rawOrderId, processedAt: status === 'PROCESSED' ? new Date().toISOString() : undefined })
       .where(eq(emails.id, id))
       .returning();
     return updated;
@@ -84,13 +87,13 @@ export class DatabaseStorage implements IStorage {
     return job;
   }
 
-  async getJobWithDetails(id: number): Promise<Job & { attachment: Attachment, uploads: Upload[] }> {
+  async getJobWithDetails(id: number): Promise<(Job & { attachment: Attachment, uploads: Upload[] }) | undefined> {
     const job = await this.getJob(id);
-    if (!job) throw new Error("Job not found");
-    
+    if (!job) return undefined;
+
     const [attachment] = await db.select().from(attachments).where(eq(attachments.id, job.attachmentId));
     const jobUploads = await db.select().from(uploads).where(eq(uploads.jobId, id));
-    
+
     return { ...job, attachment, uploads: jobUploads };
   }
 
@@ -116,7 +119,7 @@ export class DatabaseStorage implements IStorage {
 
   async updateJob(id: number, updates: Partial<Job>): Promise<Job> {
     const [updated] = await db.update(jobs)
-      .set({ ...updates, updatedAt: new Date() })
+      .set({ ...updates, updatedAt: new Date().toISOString() })
       .where(eq(jobs.id, id))
       .returning();
     return updated;
@@ -155,7 +158,7 @@ export class DatabaseStorage implements IStorage {
     const [mapping] = await db.select().from(mappings).where(eq(mappings.extractedOrderId, extractedOrderId));
     return mapping;
   }
-  
+
   async getAllMappings(): Promise<Mapping[]> {
     return db.select().from(mappings);
   }
@@ -165,18 +168,18 @@ export class DatabaseStorage implements IStorage {
       status: jobs.status,
       count: sql<number>`count(*)`
     }).from(jobs).groupBy(jobs.status);
-    
+
     const emailStats = await db.select({
       status: emails.status,
       count: sql<number>`count(*)`
     }).from(emails).groupBy(emails.status);
-    
+
     const jobsMap: Record<string, number> = {};
     jobStats.forEach(s => jobsMap[s.status] = Number(s.count));
-    
+
     const emailsMap: Record<string, number> = {};
     emailStats.forEach(s => emailsMap[s.status] = Number(s.count));
-    
+
     return { jobs: jobsMap, emails: emailsMap };
   }
 }

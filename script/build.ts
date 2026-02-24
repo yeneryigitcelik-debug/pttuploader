@@ -2,32 +2,16 @@ import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
 import { rm, readFile } from "fs/promises";
 
-// server deps to bundle to reduce openat(2) syscalls
-// which helps cold start times
+// Server deps to bundle
 const allowlist = [
-  "@google/generative-ai",
   "axios",
-  "connect-pg-simple",
-  "cors",
+  "better-sqlite3",
   "date-fns",
   "drizzle-orm",
   "drizzle-zod",
   "express",
-  "express-rate-limit",
-  "express-session",
-  "jsonwebtoken",
-  "memorystore",
   "multer",
-  "nanoid",
-  "nodemailer",
-  "openai",
-  "passport",
-  "passport-local",
-  "pg",
-  "stripe",
-  "uuid",
-  "ws",
-  "xlsx",
+  "pdf-parse",
   "zod",
   "zod-validation-error",
 ];
@@ -45,6 +29,8 @@ async function buildAll() {
     ...Object.keys(pkg.devDependencies || {}),
   ];
   const externals = allDeps.filter((dep) => !allowlist.includes(dep));
+  // Always externalize native modules
+  externals.push("better-sqlite3");
 
   await esbuild({
     entryPoints: ["server/index.ts"],

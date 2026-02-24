@@ -1,6 +1,7 @@
 import { chromium, type Page } from 'playwright';
 import { selectors } from '../config/pttSelectors';
 import path from 'path';
+import fs from 'fs';
 import { normalizeName } from './extractor';
 
 export interface Candidate {
@@ -67,7 +68,9 @@ export async function uploadPdf(orderId: string, filePath: string): Promise<{ su
   });
   
   const evidenceDir = path.join(process.cwd(), 'data', 'evidence');
-  // ensure dir exists...
+  if (!fs.existsSync(evidenceDir)) {
+    fs.mkdirSync(evidenceDir, { recursive: true });
+  }
 
   try {
     const context = await browser.newContext();
